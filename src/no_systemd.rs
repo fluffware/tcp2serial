@@ -1,7 +1,7 @@
 use clap::{ArgMatches, Command};
 use log::info;
 
-pub fn add_args<'a>(app_args: Command) -> Command {
+pub fn add_args(app_args: Command) -> Command {
     app_args
 }
 

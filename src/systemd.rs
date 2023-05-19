@@ -1,4 +1,4 @@
-use clap::{Arg, ArgMatches, Command, ArgAction};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use log::{info, warn, LevelFilter};
 use std::sync::atomic::{AtomicBool, Ordering};
 use systemd::daemon::notify;
@@ -17,7 +17,10 @@ pub fn add_args(app_args: Command) -> Command {
 }
 
 pub fn start(args: &ArgMatches) {
-    DAEMON.store(!args.get_one::<bool>("NO_SYSTEMD").unwrap_or(&false), Ordering::Relaxed);
+    DAEMON.store(
+        !args.get_one::<bool>("NO_SYSTEMD").unwrap_or(&false),
+        Ordering::Relaxed,
+    );
     if DAEMON.load(Ordering::Relaxed) {
         if let Err(e) = JournalLog::init() {
             eprintln!("Failed to start logging: {}", e);
