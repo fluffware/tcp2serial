@@ -1,0 +1,13 @@
+[Unit]
+Description="TCP to serial gateway"
+
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=tcp2serial -d /dev/ttyUSB0
+RestartSec=5
+Restart=always
+
+[Install]
+WantedBy=default.target
