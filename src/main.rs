@@ -12,7 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal;
 use tokio::sync::Notify;
-use tokio_serial::SerialStream;
+use tokio_serial::{Parity, SerialStream};
 
 type DynResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -170,6 +170,12 @@ struct CmdArgs {
     /// Serial speed (bps)
     #[arg(long, short = 's', default_value_t=DEFAULT_SERIAL_SPEED)]
     serial_speed: u32,
+    /// Select odd parity
+    #[arg(long, short = 'o')]
+    odd_parity: bool,
+    /// Select even parity
+    #[arg(long, short = 'e', conflicts_with("odd_parity"))]
+    even_parity: bool,
     /// Minimum time (in milliseconds) from idle communication
     /// until switch to different TCP connection
     #[arg(long, short = 't', default_value_t=DEFAULT_SWITCH_DELAY)]
@@ -189,7 +195,14 @@ async fn main() -> ExitCode {
         }
     };
     daemon::start(&matches);
-    let ser_conf = tokio_serial::new(args.serial_device, args.serial_speed);
+    let parity = if args.even_parity {
+        Parity::Even
+    } else if args.odd_parity {
+        Parity::Odd
+    } else {
+        Parity::None
+    };
+    let ser_conf = tokio_serial::new(args.serial_device, args.serial_speed).parity(parity);
     let ser = Request::new(match SerialStream::open(&ser_conf) {
         Ok(s) => s,
         Err(e) => {
