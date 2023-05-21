@@ -226,7 +226,7 @@ async fn main() -> ExitCode {
         cancel.clone(),
         Duration::from_millis(args.switch_delay),
     ));
-
+    tokio::pin!(net_task);
     daemon::ready();
     'main_loop: loop {
         tokio::select! {
@@ -234,14 +234,23 @@ async fn main() -> ExitCode {
                 if let Err(e) = res {
                     error!("Failed to wait for ctrl-c: {}",e);
                 }
-                break 'main_loop;
+                cancel.notify_waiters();
+
             },
+            res = net_task.as_mut() => {
+                match res {
+                    Ok(res) => {
+                        if let Err(e) = res {
+                            error!("{e}")
+                        }
+                    },
+                    Err(e) => error!("Network task failed: {e}"),
+                }
+                break 'main_loop;
+            }
         }
     }
-    cancel.notify_waiters();
-    if let Err(e) = net_task.await {
-        error!("Network task failed: {e}");
-    }
+
     daemon::exiting();
     ExitCode::SUCCESS
 }
