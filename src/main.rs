@@ -2,9 +2,14 @@ use clap::{CommandFactory, FromArgMatches, Parser};
 use futures::stream::FuturesUnordered;
 use futures_util::StreamExt;
 use log::{debug, error};
+use std::future::Future;
+use std::marker::Unpin;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::pin::Pin;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::task::Context;
+use std::task::Poll;
 use std::time::Duration;
 use tcp2serial::daemon;
 use tcp2serial::shared_resource::Request;
@@ -16,11 +21,37 @@ use tokio_serial::{Parity, SerialStream};
 
 type DynResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+struct FutureOption<F>(Option<F>);
+
+impl<F> Future for FutureOption<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+    fn poll(self: Pin<&mut Self>, ctxt: &mut Context<'_>) -> Poll<Self::Output> {
+        match unsafe { Pin::new_unchecked(&mut self.get_unchecked_mut().0) }.as_pin_mut() {
+            Some(f) => f.poll(ctxt),
+            None => Poll::Pending,
+        }
+    }
+}
+
+impl<F> FutureOption<F>
+where
+    F: Future,
+{
+    fn replace(self: &mut Pin<&mut Self>, r: Option<F>) {
+        let opt: &mut Self = unsafe {self.as_mut().get_unchecked_mut() };
+        opt.0 = r;
+    }
+}
+
 async fn connection_handler<S>(
     mut stream: TcpStream,
     ser_shared: Request<S>,
     cancel: Arc<Notify>,
     switch_delay: Duration,
+    framing_delay: Duration,
 ) -> DynResult<()>
 where
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -55,17 +86,32 @@ where
             }
         }
         let mut timed_out = false;
+        let mut ser_buf_end = 0;
+        let framing_timeout = FutureOption::<tokio::time::Sleep>(None);
+        tokio::pin!(framing_timeout);
         'read_loop: loop {
+            println!("Loop");
             tokio::select! {
-                res = ser.read(&mut ser_buf) => {
+                res = ser.read(&mut ser_buf[ser_buf_end..]) => {
                     match res {
                         Ok(rlen) => {
-                            stream.write_all(&ser_buf[0..rlen]).await?;
+                            ser_buf_end += rlen;
+                            if framing_delay == Duration::ZERO || ser_buf_end == ser_buf.len() {
+                                stream.write_all(&ser_buf[0..ser_buf_end]).await?;
+                                ser_buf_end = 0;
+                            } else {
+                                framing_timeout.replace(Some(tokio::time::sleep(framing_delay)));
+                            }
                         }
                         Err(e) => {
                             return Err(e.into());
                         }
                     }
+                }
+                _res = framing_timeout.as_mut() => {
+                    framing_timeout.replace(None);
+                    stream.write_all(&ser_buf[0..ser_buf_end]).await?;
+                    ser_buf_end = 0;
                 }
                 res = stream.read(&mut net_buf) => {
                     match res {
@@ -101,6 +147,7 @@ async fn tcp_listener<S>(
     ser: Request<S>,
     cancel: Arc<Notify>,
     switch_delay: Duration,
+    framing_delay: Duration,
 ) -> DynResult<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -120,7 +167,8 @@ where
                     Ok((stream, sock)) => {
                         debug!("Connection from {sock}");
                         let h = tokio::spawn(connection_handler(stream, ser.clone(),
-                                                                cancel.clone(),switch_delay));
+                                                                cancel.clone(),
+                                                                switch_delay,framing_delay));
                         child_handlers.push(h);
                     }
                     Err(e) => {
@@ -155,6 +203,7 @@ const DEFAULT_TCP_PORT: u16 = 10001;
 const DEFAULT_SERIAL_SPEED: u32 = 9600;
 
 const DEFAULT_SWITCH_DELAY: u64 = 1000; // 1s
+const DEFAULT_FRAMING_DELAY: u64 = 0; // No delay
 
 #[derive(Parser, Debug)]
 struct CmdArgs {
@@ -180,6 +229,10 @@ struct CmdArgs {
     /// until switch to different TCP connection
     #[arg(long, short = 't', default_value_t=DEFAULT_SWITCH_DELAY)]
     switch_delay: u64,
+    /// Maximum time (in milliseconds) between reception of serial data
+    /// that will be sent as a single packet.
+    #[arg(long, default_value_t=DEFAULT_FRAMING_DELAY)]
+    framing_delay: u64,
 }
 
 #[tokio::main]
@@ -225,6 +278,7 @@ async fn main() -> ExitCode {
         ser,
         cancel.clone(),
         Duration::from_millis(args.switch_delay),
+        Duration::from_millis(args.framing_delay),
     ));
     tokio::pin!(net_task);
     daemon::ready();
