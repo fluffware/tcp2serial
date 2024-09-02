@@ -90,7 +90,6 @@ where
         let framing_timeout = FutureOption::<tokio::time::Sleep>(None);
         tokio::pin!(framing_timeout);
         'read_loop: loop {
-            println!("Loop");
             tokio::select! {
                 res = ser.read(&mut ser_buf[ser_buf_end..]) => {
                     match res {
