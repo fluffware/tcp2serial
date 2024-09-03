@@ -41,7 +41,7 @@ where
     F: Future,
 {
     fn replace(self: &mut Pin<&mut Self>, r: Option<F>) {
-        let opt: &mut Self = unsafe {self.as_mut().get_unchecked_mut() };
+        let opt: &mut Self = unsafe { self.as_mut().get_unchecked_mut() };
         opt.0 = r;
     }
 }
@@ -180,11 +180,11 @@ where
                     Some(res) => {
                         match res {
                             Ok(Err(e)) => {
-                            error!("Connection handler exited with error: {e}");
+				return Err(format!("Connection handler exited with error: {e}").into());
                             }
                             Ok(Ok(())) => {}
                             Err(e) => {
-                        error!("Connection handler failed: {e}");
+				return Err(format!("Connection handler failed: {e}").into());
                             }
                         }
                     }
