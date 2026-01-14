@@ -1,7 +1,7 @@
 use clap::{CommandFactory, FromArgMatches, Parser};
 use futures::stream::FuturesUnordered;
 use futures_util::StreamExt;
-use log::{debug, error};
+use log::{debug, error, warn};
 use std::future::Future;
 use std::marker::Unpin;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -180,11 +180,11 @@ where
                     Some(res) => {
                         match res {
                             Ok(Err(e)) => {
-				return Err(format!("Connection handler exited with error: {e}").into());
+				warn!("Connection handler exited with error: {e}");
                             }
                             Ok(Ok(())) => {}
                             Err(e) => {
-				return Err(format!("Connection handler failed: {e}").into());
+                return Err(format!("Connection handler failed: {e}").into());
                             }
                         }
                     }
